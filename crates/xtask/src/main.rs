@@ -111,17 +111,17 @@ enum Module {
 impl Module {
     fn rust_pkg(self) -> &'static str {
         match self {
-            Module::Net => "tool-net",
-            Module::Fs => "tool-fs",
-            Module::Sys => "tool-sys",
+            Module::Net => "forgeffi-net",
+            Module::Fs => "forgeffi-fs",
+            Module::Sys => "forgeffi-sys",
         }
     }
 
     fn ffi_pkg(self) -> &'static str {
         match self {
-            Module::Net => "tool-net-ffi",
-            Module::Fs => "tool-fs-ffi",
-            Module::Sys => "tool-sys-ffi",
+            Module::Net => "forgeffi-net-ffi",
+            Module::Fs => "forgeffi-fs-ffi",
+            Module::Sys => "forgeffi-sys-ffi",
         }
     }
 
@@ -465,8 +465,8 @@ fn resolve_packages(args: &BuildArgs) -> anyhow::Result<Vec<&'static str>> {
             let modules = normalize_modules(&args.modules);
             Ok(modules.into_iter().map(Module::ffi_pkg).collect())
         }
-        BuildMode::AggregateRust => Ok(vec!["tool"]),
-        BuildMode::AggregateFfi => Ok(vec!["tool-ffi"]),
+        BuildMode::AggregateRust => Ok(vec!["forgeffi"]),
+        BuildMode::AggregateFfi => Ok(vec!["forgeffi-ffi"]),
     }
 }
 

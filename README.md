@@ -66,7 +66,7 @@ Windows 下动态库会同时输出导入库（C/C++ 链接时需要）：
 
 ## C 语言调用示例
 
-构建 `tool-net-ffi`（Windows MSVC，release）：
+构建 `forgeffi-net-ffi`（Windows MSVC，release）：
 
 ```bash
 cargo xtask build --mode module-ffi --modules net --profile release --target x86_64-pc-windows-msvc --zigbuild=false --headers=true
@@ -74,9 +74,9 @@ cargo xtask build --mode module-ffi --modules net --profile release --target x86
 
 然后在 C 项目中：
 
-- include：`dist/x86_64-pc-windows-msvc/release/tool-net-ffi/include/tool-net-ffi.h`
-- link：`dist/x86_64-pc-windows-msvc/release/tool-net-ffi/cdylib/tool_net_ffi.dll.lib`
-- runtime：`tool_net_ffi.dll` 放到可加载路径
+- include：`dist/x86_64-pc-windows-msvc/release/forgeffi-net-ffi/include/forgeffi-net-ffi.h`
+- link：`dist/x86_64-pc-windows-msvc/release/forgeffi-net-ffi/cdylib/forgeffi_net_ffi.dll.lib`
+- runtime：`forgeffi_net_ffi.dll` 放到可加载路径
 
 ## 交叉编译与 all 构建
 
@@ -89,11 +89,11 @@ cargo xtask build --mode module-ffi --modules net --profile release --target x86
 
 | crate | 说明 |
 | --- | --- |
-| `toolbase` | 公共基础能力（其他 crate 复用） |
-| `tool-net` / `tool-fs` / `tool-sys` | 各模块 Rust 实现 |
-| `tool-net-ffi` / `tool-fs-ffi` / `tool-sys-ffi` | 各模块 FFI 产物（`cdylib`/`staticlib`） |
-| `tool` | Rust 聚合 crate（通过 features 组合模块） |
-| `tool-ffi` | FFI 聚合 crate（通过 features 组合模块） |
+| `forgeffi-base` | 公共基础能力（其他 crate 复用） |
+| `forgeffi-net` / `forgeffi-fs` / `forgeffi-sys` | 各模块 Rust 实现 |
+| `forgeffi-net-ffi` / `forgeffi-fs-ffi` / `forgeffi-sys-ffi` | 各模块 FFI 产物（`cdylib`/`staticlib`） |
+| `forgeffi` | Rust 聚合 crate（通过 features 组合模块） |
+| `forgeffi-ffi` | FFI 聚合 crate（通过 features 组合模块） |
 | `xtask` | 构建前端（交互菜单/批量构建/自动下载 Zig/生成头文件） |
 
 ## 开发与质量检查

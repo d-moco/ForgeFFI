@@ -1,0 +1,21 @@
+[package]
+name = "forgeffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+forgeffi-base = { path = "../forgeffi-base" }
+forgeffi-net = { path = "../forgeffi-net", optional = true }
+forgeffi-fs = { path = "../forgeffi-fs", optional = true }
+forgeffi-sys = { path = "../forgeffi-sys", optional = true }
+
+[features]
+default = []
+net = ["dep:forgeffi-net"]
+fs = ["dep:forgeffi-fs"]
+sys = ["dep:forgeffi-sys"]
+full = ["net", "fs", "sys"]
+
+[lib]
+path = "src/lib.rs"
+

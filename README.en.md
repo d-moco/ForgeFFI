@@ -66,7 +66,7 @@ Note: some targets (e.g. `*-unknown-linux-musl`) may not support `cdylib`. If a 
 
 ## C integration example
 
-Build `tool-net-ffi` (Windows MSVC, release):
+Build `forgeffi-net-ffi` (Windows MSVC, release):
 
 ```bash
 cargo xtask build --mode module-ffi --modules net --profile release --target x86_64-pc-windows-msvc --zigbuild=false --headers=true
@@ -74,9 +74,9 @@ cargo xtask build --mode module-ffi --modules net --profile release --target x86
 
 In your C project:
 
-- include: `dist/x86_64-pc-windows-msvc/release/tool-net-ffi/include/tool-net-ffi.h`
-- link: `dist/x86_64-pc-windows-msvc/release/tool-net-ffi/cdylib/tool_net_ffi.dll.lib`
-- runtime: make sure `tool_net_ffi.dll` is in a loadable path
+- include: `dist/x86_64-pc-windows-msvc/release/forgeffi-net-ffi/include/forgeffi-net-ffi.h`
+- link: `dist/x86_64-pc-windows-msvc/release/forgeffi-net-ffi/cdylib/forgeffi_net_ffi.dll.lib`
+- runtime: make sure `forgeffi_net_ffi.dll` is in a loadable path
 
 ## Cross-compiling and `all`
 

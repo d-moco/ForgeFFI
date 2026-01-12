@@ -1,0 +1,21 @@
+[package]
+name = "forgeffi-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+forgeffi-net-ffi = { path = "../forgeffi-net-ffi", optional = true }
+forgeffi-fs-ffi = { path = "../forgeffi-fs-ffi", optional = true }
+forgeffi-sys-ffi = { path = "../forgeffi-sys-ffi", optional = true }
+
+[features]
+default = []
+net = ["dep:forgeffi-net-ffi"]
+fs = ["dep:forgeffi-fs-ffi"]
+sys = ["dep:forgeffi-sys-ffi"]
+full = ["net", "fs", "sys"]
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "staticlib"]
+

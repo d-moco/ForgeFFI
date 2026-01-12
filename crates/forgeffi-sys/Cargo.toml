@@ -1,10 +1,10 @@
 [package]
-name = "tool-sys"
+name = "forgeffi-sys"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-toolbase = { path = "../toolbase" }
+forgeffi-base = { path = "../forgeffi-base" }
 
 [lib]
 path = "src/lib.rs"

@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/toolbase",
-  "crates/tool-net",
-  "crates/tool-net-ffi",
-  "crates/tool-fs",
-  "crates/tool-fs-ffi",
-  "crates/tool-sys",
-  "crates/tool-sys-ffi",
-  "crates/tool",
-  "crates/tool-ffi",
+  "crates/forgeffi-base",
+  "crates/forgeffi-net",
+  "crates/forgeffi-net-ffi",
+  "crates/forgeffi-fs",
+  "crates/forgeffi-fs-ffi",
+  "crates/forgeffi-sys",
+  "crates/forgeffi-sys-ffi",
+  "crates/forgeffi",
+  "crates/forgeffi-ffi",
   "crates/xtask",
 ]
 

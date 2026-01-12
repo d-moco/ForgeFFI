@@ -1,11 +1,11 @@
 [package]
-name = "tool-fs-ffi"
+name = "forgeffi-net-ffi"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tool-fs = { path = "../tool-fs" }
-toolbase = { path = "../toolbase" }
+forgeffi-net = { path = "../forgeffi-net" }
+forgeffi-base = { path = "../forgeffi-base" }
 
 [lib]
 path = "src/lib.rs"
