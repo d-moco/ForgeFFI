@@ -10,5 +10,6 @@ members = [
   "crates/tool-sys-ffi",
   "crates/tool",
   "crates/tool-ffi",
+  "crates/xtask",
 ]
 

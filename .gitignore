@@ -28,3 +28,5 @@ Thumbs.db
 zig-out/*
 examples/c/main.exe
 examples/c/main.pdb
+
+dist/*

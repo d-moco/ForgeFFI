@@ -1,0 +1,24 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.11"
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+xz2 = "0.1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
