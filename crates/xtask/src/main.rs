@@ -59,6 +59,9 @@ struct BuildArgs {
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     zigbuild: bool,
 
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    headers: bool,
+
     #[arg(long)]
     dist_dir: Option<PathBuf>,
 }
@@ -222,13 +225,21 @@ fn menu() -> anyhow::Result<()> {
         }
     };
 
-    let common_targets = common_targets();
+    let mut target_items = Vec::with_capacity(common_targets().len() + 1);
+    target_items.push("all（全部）".to_string());
+    target_items.extend(common_targets());
+
     let target_idx = Select::with_theme(&theme)
         .with_prompt("选择目标平台 (target triple)")
-        .items(&common_targets)
+        .items(&target_items)
         .default(0)
         .interact()?;
-    let mut target = common_targets[target_idx].clone();
+
+    let selected_targets = if target_idx == 0 {
+        common_targets()
+    } else {
+        vec![target_items[target_idx].clone()]
+    };
 
     let zig_version: String = Input::with_theme(&theme)
         .with_prompt("Zig 版本")
@@ -240,25 +251,118 @@ fn menu() -> anyhow::Result<()> {
         .default(true)
         .interact()?;
 
-    if zigbuild {
-        if let Some(mapped) = map_windows_msvc_target_for_zigbuild(&target) {
-            target = mapped.to_string();
+    let headers = match mode {
+        BuildMode::ModuleFfi | BuildMode::AggregateFfi => {
+            Confirm::with_theme(&theme)
+                .with_prompt("生成 C 头文件")
+                .default(true)
+                .interact()?
         }
-    }
+        _ => false,
+    };
 
     let dist_dir = Some(PathBuf::from("dist"));
 
-    build(BuildArgs {
-        target: Some(target),
-        profile,
-        mode,
-        modules,
-        features,
-        artifact,
-        zig_version,
-        zigbuild,
-        dist_dir,
-    })
+    let workspace_root = workspace_root()?;
+    let host = host_target_triple()?;
+    let mut failures = Vec::new();
+
+    for original_target in selected_targets {
+        if should_skip_target(&host, &original_target) {
+            println!("提示: 跳过 target={original_target}（当前环境不支持）");
+            continue;
+        }
+
+        let effective_zigbuild = if zigbuild && original_target.contains("windows-msvc") {
+            let mapped = map_windows_msvc_target_for_zigbuild(&original_target);
+            let can_map = mapped.is_some();
+
+            let items = if can_map {
+                vec![
+                    "保持 MSVC target（将自动关闭 zigbuild）",
+                    "切换到 zigbuild 支持的 target（GNU/GNU-LLVM）",
+                ]
+            } else {
+                vec!["保持 MSVC target（将自动关闭 zigbuild）"]
+            };
+
+            let choice = Select::with_theme(&theme)
+                .with_prompt("检测到 Windows MSVC target，zigbuild 可能不兼容")
+                .items(&items)
+                .default(0)
+                .interact()?;
+
+            if can_map && choice == 1 {
+                let mapped = mapped.ok_or_else(|| anyhow!("无法映射 target"))?;
+                println!(
+                    "提示: 为使用 zigbuild，target 已从 {original_target} 切换为 {mapped}"
+                );
+                run_one_build(
+                    &workspace_root,
+                    BuildArgs {
+                        target: Some(mapped.to_string()),
+                        profile,
+                        mode,
+                        modules: modules.clone(),
+                        features: features.clone(),
+                        artifact,
+                        zig_version: zig_version.clone(),
+                        zigbuild: true,
+                        headers,
+                        dist_dir: dist_dir.clone(),
+                    },
+                )
+                .map_err(|e| failures.push((original_target.clone(), e)))
+                .ok();
+                continue;
+            }
+
+            println!(
+                "提示: 将使用 MSVC toolchain 构建，已关闭 zigbuild（target={original_target}）"
+            );
+            false
+        } else {
+            zigbuild
+        };
+
+        run_one_build(
+            &workspace_root,
+            BuildArgs {
+                target: Some(original_target.clone()),
+                profile,
+                mode,
+                modules: modules.clone(),
+                features: features.clone(),
+                artifact,
+                zig_version: zig_version.clone(),
+                zigbuild: effective_zigbuild,
+                headers,
+                dist_dir: dist_dir.clone(),
+            },
+        )
+        .map_err(|e| failures.push((original_target.clone(), e)))
+        .ok();
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        let mut msg = String::from("部分 target 构建失败:\n");
+        for (t, e) in failures {
+            msg.push_str(&format!("- {t}: {e:#}\n"));
+        }
+        bail!(msg)
+    }
+}
+
+fn run_one_build(_workspace_root: &Path, args: BuildArgs) -> anyhow::Result<()> {
+    build(args)
+}
+
+fn should_skip_target(host: &str, target: &str) -> bool {
+    let host_is_macos = host.contains("apple-darwin");
+    let target_is_apple = target.contains("apple-");
+    target_is_apple && !host_is_macos
 }
 
 fn build(mut args: BuildArgs) -> anyhow::Result<()> {
@@ -275,8 +379,10 @@ fn build(mut args: BuildArgs) -> anyhow::Result<()> {
     let host = host_target_triple()?;
     if args.zigbuild && target.contains("windows-msvc") {
         if target == host {
+            println!("提示: 当前为本机 MSVC target，使用普通 cargo build（关闭 zigbuild）：{target}");
             args.zigbuild = false;
         } else if let Some(mapped) = map_windows_msvc_target_for_zigbuild(&target) {
+            println!("提示: 为使用 zigbuild，target 已从 {target} 切换为 {mapped}");
             args.target = Some(mapped.to_string());
         } else {
             bail!("cargo-zigbuild 不支持该 Windows MSVC target: {target}");
@@ -339,6 +445,10 @@ fn build(mut args: BuildArgs) -> anyhow::Result<()> {
                 args.profile,
                 args.artifact,
             )?;
+
+            if args.headers {
+                generate_c_header_to_dist(&workspace_root, &dist_dir, pkg, &target, args.profile)?;
+            }
         }
     }
 
@@ -390,8 +500,25 @@ fn copy_artifact_to_dist(
     };
 
     let lib_name = pkg.replace('-', "_");
-    let src = find_artifact_path(&out_dir, &lib_name, target, kind)
-        .with_context(|| format!("未找到产物: pkg={pkg} kind={}", kind.as_str()))?;
+    let (src, effective_kind) = match find_artifact_path(&out_dir, &lib_name, target, kind) {
+        Ok(p) => (p, kind),
+        Err(e) => {
+            if kind == ArtifactKind::Cdylib {
+                let fallback = find_artifact_path(&out_dir, &lib_name, target, ArtifactKind::Staticlib)
+                    .with_context(|| {
+                        format!("未找到产物: pkg={pkg} kind={} / fallback=staticlib: {e:#}", kind.as_str())
+                    })?;
+                println!(
+                    "提示: target={target} 未生成动态库，已改为输出静态库"
+                );
+                (fallback, ArtifactKind::Staticlib)
+            } else {
+                return Err(e).with_context(|| {
+                    format!("未找到产物: pkg={pkg} kind={}", kind.as_str())
+                });
+            }
+        }
+    };
 
     let dst_dir = dist_dir
         .join(target)
@@ -400,7 +527,7 @@ fn copy_artifact_to_dist(
             BuildProfile::Release => "release",
         })
         .join(pkg)
-        .join(kind.as_str());
+        .join(effective_kind.as_str());
     fs::create_dir_all(&dst_dir).context("创建 dist 子目录失败")?;
     let dst = dst_dir.join(
         src.file_name()
@@ -412,6 +539,88 @@ fn copy_artifact_to_dist(
     })?;
 
     println!("dist: {}", dst.display());
+
+    if effective_kind == ArtifactKind::Cdylib && target.contains("windows") {
+        let import_libs = find_windows_import_libs(&out_dir, &lib_name)?;
+        if import_libs.is_empty() {
+            bail!("未找到 Windows 导入库(.lib/.dll.a)，请检查构建输出: pkg={pkg} target={target}");
+        }
+        for import_lib in import_libs {
+            let dst = dst_dir.join(
+                import_lib
+                    .file_name()
+                    .ok_or_else(|| anyhow!("导入库路径缺少文件名"))?,
+            );
+            fs::copy(&import_lib, &dst).with_context(|| {
+                format!("复制导入库失败: {} -> {}", import_lib.display(), dst.display())
+            })?;
+            println!("dist: {}", dst.display());
+        }
+    }
+    Ok(())
+}
+
+fn find_windows_import_libs(out_dir: &Path, lib_basename: &str) -> anyhow::Result<Vec<PathBuf>> {
+    let mut found: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
+    let candidates = [out_dir.to_path_buf(), out_dir.join("deps")];
+    for dir in candidates {
+        if !dir.is_dir() {
+            continue;
+        }
+        for ent in fs::read_dir(&dir).with_context(|| format!("读取目录失败: {}", dir.display()))? {
+            let ent = ent.with_context(|| format!("读取目录项失败: {}", dir.display()))?;
+            let ty = ent.file_type().context("读取文件类型失败")?;
+            if !ty.is_file() {
+                continue;
+            }
+            let name = ent.file_name();
+            let name = name.to_string_lossy();
+            if !name.contains(lib_basename) {
+                continue;
+            }
+            if name.ends_with(".dll.lib") || name.ends_with(".dll.a") {
+                found.entry(name.to_string()).or_insert_with(|| ent.path());
+            }
+        }
+    }
+    Ok(found.into_values().collect())
+}
+
+fn generate_c_header_to_dist(
+    workspace_root: &Path,
+    dist_dir: &Path,
+    pkg: &str,
+    target: &str,
+    profile: BuildProfile,
+) -> anyhow::Result<()> {
+    ensure_binary("cbindgen", "cbindgen")?;
+
+    let crate_dir = workspace_root.join("crates").join(pkg);
+    if !crate_dir.is_dir() {
+        bail!("未找到 crate 目录: {}", crate_dir.display());
+    }
+
+    let include_dir = dist_dir
+        .join(target)
+        .join(match profile {
+            BuildProfile::Debug => "debug",
+            BuildProfile::Release => "release",
+        })
+        .join(pkg)
+        .join("include");
+    fs::create_dir_all(&include_dir).context("创建 include 目录失败")?;
+
+    let header_path = include_dir.join(format!("{pkg}.h"));
+
+    let mut cmd = Command::new("cbindgen");
+    cmd.current_dir(workspace_root);
+    cmd.arg("--lang").arg("c");
+    cmd.arg("--crate").arg(pkg);
+    cmd.arg("--output").arg(&header_path);
+    cmd.arg(crate_dir);
+
+    run_checked("cbindgen", &mut cmd)?;
+    println!("dist: {}", header_path.display());
     Ok(())
 }
 
@@ -496,6 +705,35 @@ fn ensure_cargo_subcommand(sub: &str) -> anyhow::Result<()> {
     }
 }
 
+fn ensure_binary(bin: &str, install_crate: &str) -> anyhow::Result<()> {
+    let ok = Command::new(bin)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        return Ok(());
+    }
+
+    let status = Command::new("cargo")
+        .arg("install")
+        .arg(install_crate)
+        .arg("--locked")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("安装工具失败: {install_crate}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("安装工具失败: {install_crate}")
+    }
+}
+
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let out = Command::new("cargo")
         .arg("metadata")
@@ -533,18 +771,7 @@ fn host_target_triple() -> anyhow::Result<String> {
 }
 
 fn ensure_rust_target(target: &str) -> anyhow::Result<()> {
-    let ok = Command::new("rustc")
-        .arg("--print")
-        .arg("target-libdir")
-        .arg("--target")
-        .arg(target)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if ok {
+    if is_rust_std_installed(target)? {
         return Ok(());
     }
 
@@ -569,11 +796,50 @@ fn ensure_rust_target(target: &str) -> anyhow::Result<()> {
         .stderr(Stdio::inherit())
         .status()
         .with_context(|| format!("执行 rustup target add 失败: {target}"))?;
-    if status.success() {
-        Ok(())
-    } else {
+    if !status.success() {
         bail!("rustup target add 失败: {target}")
     }
+    if is_rust_std_installed(target)? {
+        Ok(())
+    } else {
+        bail!("目标安装后仍缺少 std: {target}")
+    }
+}
+
+fn is_rust_std_installed(target: &str) -> anyhow::Result<bool> {
+    let out = Command::new("rustc")
+        .arg("--print")
+        .arg("target-libdir")
+        .arg("--target")
+        .arg(target)
+        .stdin(Stdio::null())
+        .output()
+        .context("执行 rustc --print target-libdir 失败")?;
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let s = String::from_utf8(out.stdout).context("rustc 输出不是 UTF-8")?;
+    let dir = PathBuf::from(s.trim());
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+
+    for ent in fs::read_dir(&dir).with_context(|| format!("读取目录失败: {}", dir.display()))? {
+        let ent = ent.with_context(|| format!("读取目录项失败: {}", dir.display()))?;
+        let ty = ent.file_type().context("读取文件类型失败")?;
+        if !ty.is_file() {
+            continue;
+        }
+        let name = ent.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("libstd-") && name.ends_with(".rlib") {
+            return Ok(true);
+        }
+        if name.starts_with("libstd-") && name.ends_with(".a") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn common_targets() -> Vec<String> {
