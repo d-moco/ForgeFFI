@@ -14,7 +14,7 @@ use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
 #[derive(Parser)]
-#[command(version, about = "tool-rs 构建工具")]
+#[command(version, about = "ForgeFFI 构建工具")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -872,18 +872,27 @@ fn map_windows_msvc_target_for_zigbuild(target: &str) -> Option<&'static str> {
 
 fn ensure_zig(version: &str) -> anyhow::Result<PathBuf> {
     let base = BaseDirs::new().ok_or_else(|| anyhow!("无法定位用户目录"))?;
-    let cache_root = base.cache_dir().join("tool-rs").join("zig");
+    let cache_root = base.cache_dir().join("forgeffi").join("zig");
+    let legacy_cache_root = base.cache_dir().join("tool-rs").join("zig");
     fs::create_dir_all(&cache_root).context("创建 Zig 缓存目录失败")?;
 
     let platform = ZigPlatform::detect()?;
-    let install_dir = cache_root
-        .join(version)
-        .join(platform.cache_key());
+    let install_dir = cache_root.join(version).join(platform.cache_key());
     fs::create_dir_all(&install_dir).context("创建 Zig 安装目录失败")?;
 
     let zig_path = platform.zig_bin_path(&install_dir);
     if zig_path.exists() {
         return Ok(zig_path);
+    }
+
+    let legacy_install_dir = legacy_cache_root.join(version).join(platform.cache_key());
+    let legacy_zig_path = platform.zig_bin_path(&legacy_install_dir);
+    if legacy_zig_path.exists() {
+        copy_dir_all(&legacy_install_dir, &install_dir).context("复制旧 Zig 缓存目录失败")?;
+        let zig_path = platform.zig_bin_path(&install_dir);
+        if zig_path.exists() {
+            return Ok(zig_path);
+        }
     }
 
     let release = ZigRelease::for_platform(version, platform)?;
@@ -927,7 +936,8 @@ impl ZigRelease {
     }
 
     fn for_platform(version: &str, platform: ZigPlatform) -> anyhow::Result<ZigRelease> {
-        let index_url = std::env::var("TOOL_RS_ZIG_INDEX_URL")
+        let index_url = std::env::var("FORGEFFI_ZIG_INDEX_URL")
+            .or_else(|_| std::env::var("TOOL_RS_ZIG_INDEX_URL"))
             .unwrap_or_else(|_| "https://ziglang.org/download/index.json".to_string());
         let index_text = ureq::get(&index_url)
             .call()
