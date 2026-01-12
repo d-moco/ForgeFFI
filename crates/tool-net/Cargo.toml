@@ -1,0 +1,11 @@
+[package]
+name = "tool-net"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+toolbase = { path = "../toolbase" }
+
+[lib]
+path = "src/lib.rs"
+

@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/toolbase",
+  "crates/tool-net",
+  "crates/tool-net-ffi",
+  "crates/tool-fs",
+  "crates/tool-fs-ffi",
+  "crates/tool-sys",
+  "crates/tool-sys-ffi",
+  "crates/tool",
+  "crates/tool-ffi",
+]
+

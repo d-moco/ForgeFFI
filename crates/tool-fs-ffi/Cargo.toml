@@ -1,0 +1,13 @@
+[package]
+name = "tool-fs-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tool-fs = { path = "../tool-fs" }
+toolbase = { path = "../toolbase" }
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "staticlib"]
+
