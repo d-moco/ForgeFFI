@@ -94,7 +94,8 @@ ForgeFFI 是一套用 Rust 实现的通用工具库 + 生产级 FFI 交付管线
 ### 1) 交互式构建（推荐）
 
 ```bash
-cargo xtask menu
+cargo run -p xtask menu
+# cargo xtask menu
 ```
 
 可选择：profile、模式（模块/聚合、Rust/FFI）、产物类型（动态/静态）、目标平台（包含 `all（全部）`）、是否使用 zigbuild、是否生成头文件。

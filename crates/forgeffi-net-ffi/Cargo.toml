@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-forgeffi-net = { path = "../forgeffi-net" }
 forgeffi-base = { path = "../forgeffi-base" }
+forgeffi-sys = { path = "../forgeffi-sys" }
+serde_json = "1"
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["cdylib", "staticlib"]
-
+crate-type = ["rlib", "cdylib", "staticlib"]

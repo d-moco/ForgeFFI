@@ -9,5 +9,5 @@ forgeffi-base = { path = "../forgeffi-base" }
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["rlib", "cdylib", "staticlib"]
 

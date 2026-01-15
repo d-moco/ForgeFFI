@@ -225,31 +225,52 @@ fn menu() -> anyhow::Result<()> {
         }
     };
 
-    let mut target_items = Vec::with_capacity(common_targets().len() + 1);
-    target_items.push("all（全部）".to_string());
-    target_items.extend(common_targets());
-
-    let target_idx = Select::with_theme(&theme)
-        .with_prompt("选择目标平台 (target triple)")
-        .items(&target_items)
-        .default(0)
-        .interact()?;
-
-    let selected_targets = if target_idx == 0 {
-        common_targets()
-    } else {
-        vec![target_items[target_idx].clone()]
-    };
-
-    let zig_version: String = Input::with_theme(&theme)
-        .with_prompt("Zig 版本")
-        .default("0.12.0".to_string())
-        .interact_text()?;
-
     let zigbuild = Confirm::with_theme(&theme)
         .with_prompt("使用 cargo-zigbuild 进行交叉编译")
         .default(true)
         .interact()?;
+
+    let zig_version = if zigbuild {
+        Input::with_theme(&theme)
+            .with_prompt("Zig 版本")
+            .default("0.12.0".to_string())
+            .interact_text()?
+    } else {
+        "0.12.0".to_string()
+    };
+
+    let host = host_target_triple()?;
+
+    let mut targets = Vec::with_capacity(common_targets().len() + 1);
+    targets.push(host.clone());
+    targets.extend(common_targets());
+    targets = unique_targets(targets);
+
+    let mut target_items = Vec::with_capacity(targets.len() + 1);
+    target_items.push("all（全部）".to_string());
+    target_items.extend(targets);
+
+    let default_target_idx = target_items
+        .iter()
+        .position(|t| t == &host)
+        .unwrap_or(0);
+
+    let target_idx = Select::with_theme(&theme)
+        .with_prompt("选择目标平台 (target triple)")
+        .items(&target_items)
+        .default(default_target_idx)
+        .interact()?;
+
+    let all_selected = target_idx == 0;
+    let selected_targets = if all_selected {
+        target_items
+            .iter()
+            .skip(1)
+            .cloned()
+            .collect::<Vec<String>>()
+    } else {
+        vec![target_items[target_idx].clone()]
+    };
 
     let headers = match mode {
         BuildMode::ModuleFfi | BuildMode::AggregateFfi => {
@@ -264,16 +285,18 @@ fn menu() -> anyhow::Result<()> {
     let dist_dir = Some(PathBuf::from("dist"));
 
     let workspace_root = workspace_root()?;
-    let host = host_target_triple()?;
     let mut failures = Vec::new();
 
     for original_target in selected_targets {
-        if should_skip_target(&host, &original_target) {
-            println!("提示: 跳过 target={original_target}（当前环境不支持）");
+        if let Some(reason) = skip_target_reason(&host, &original_target, all_selected) {
+            println!("提示: 跳过 target={original_target}（{reason}）");
             continue;
         }
 
-        let effective_zigbuild = if zigbuild && original_target.contains("windows-msvc") {
+        let effective_zigbuild = if zigbuild
+            && original_target.contains("windows-msvc")
+            && original_target != host
+        {
             let mapped = map_windows_msvc_target_for_zigbuild(&original_target);
             let can_map = mapped.is_some();
 
@@ -321,6 +344,8 @@ fn menu() -> anyhow::Result<()> {
                 "提示: 将使用 MSVC toolchain 构建，已关闭 zigbuild（target={original_target}）"
             );
             false
+        } else if zigbuild && original_target.contains("windows-msvc") {
+            false
         } else {
             zigbuild
         };
@@ -359,10 +384,37 @@ fn run_one_build(_workspace_root: &Path, args: BuildArgs) -> anyhow::Result<()> 
     build(args)
 }
 
-fn should_skip_target(host: &str, target: &str) -> bool {
+fn skip_target_reason(host: &str, target: &str, all_selected: bool) -> Option<String> {
     let host_is_macos = host.contains("apple-darwin");
     let target_is_apple = target.contains("apple-");
-    target_is_apple && !host_is_macos
+    if target_is_apple && !host_is_macos {
+        return Some("当前 host 不是 macOS".to_string());
+    }
+
+    if target.contains("-linux-android") && !has_android_ndk() {
+        return Some("缺少 Android NDK（请设置 ANDROID_NDK_HOME/ANDROID_NDK_ROOT 等）".to_string());
+    }
+
+    if all_selected && target.contains("windows-msvc") && target != host {
+        return Some("all 模式默认跳过非本机 MSVC 交叉目标".to_string());
+    }
+
+    None
+}
+
+fn has_android_ndk() -> bool {
+    const KEYS: [&str; 4] = ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK_HOME", "NDK_ROOT"];
+    KEYS.iter().any(|k| {
+        std::env::var_os(k)
+            .map(PathBuf::from)
+            .is_some_and(|p| p.is_dir())
+    })
+}
+
+fn unique_targets(mut targets: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::<String>::new();
+    targets.retain(|t| seen.insert(t.clone()));
+    targets
 }
 
 fn build(mut args: BuildArgs) -> anyhow::Result<()> {
@@ -449,9 +501,219 @@ fn build(mut args: BuildArgs) -> anyhow::Result<()> {
             if args.headers {
                 generate_c_header_to_dist(&workspace_root, &dist_dir, pkg, &target, args.profile)?;
             }
+
+            build_c_example_netif_list_if_applicable(
+                &workspace_root,
+                &dist_dir,
+                pkg,
+                &target,
+                args.profile,
+                args.artifact,
+                &args.zig_version,
+            )?;
         }
     }
 
+    Ok(())
+}
+
+fn build_c_example_netif_list_if_applicable(
+    workspace_root: &Path,
+    dist_dir: &Path,
+    pkg: &str,
+    target: &str,
+    profile: BuildProfile,
+    artifact: ArtifactKind,
+    zig_version: &str,
+) -> anyhow::Result<()> {
+    if pkg != "forgeffi-net-ffi" && pkg != "forgeffi-ffi" {
+        return Ok(());
+    }
+
+    let src = workspace_root
+        .join("examples")
+        .join("c")
+        .join("netif_list.c");
+    if !src.is_file() {
+        return Ok(());
+    }
+
+    let zig = ensure_zig(zig_version)?;
+
+    let bin_dir = dist_dir
+        .join(target)
+        .join(profile_dir_name(profile))
+        .join("examples");
+    fs::create_dir_all(&bin_dir).context("创建 examples 目录失败")?;
+
+    let exe_name = if target.contains("windows") {
+        "netif_list.exe"
+    } else {
+        "netif_list"
+    };
+    let exe_path = bin_dir.join(exe_name);
+
+    let mut cmd = Command::new(&zig);
+    cmd.arg("cc");
+    cmd.arg("-std=c11");
+
+    if let Some(zig_target) = zig_target_from_rust_target(target) {
+        cmd.arg("-target").arg(zig_target);
+    }
+
+    match profile {
+        BuildProfile::Debug => {
+            cmd.arg("-O0");
+            cmd.arg("-g");
+        }
+        BuildProfile::Release => {
+            cmd.arg("-O2");
+        }
+    }
+    cmd.arg(&src);
+    cmd.arg("-o").arg(&exe_path);
+
+    let effective_artifact = match artifact {
+        ArtifactKind::Cdylib => {
+            if has_cdylib(dist_dir, target, profile, pkg) {
+                ArtifactKind::Cdylib
+            } else {
+                ArtifactKind::Staticlib
+            }
+        }
+        ArtifactKind::Staticlib => ArtifactKind::Staticlib,
+    };
+
+    match effective_artifact {
+        ArtifactKind::Cdylib => {
+            if !target.contains("windows") {
+                cmd.arg("-ldl");
+            }
+        }
+        ArtifactKind::Staticlib => {
+            cmd.arg("-DFORGEFFI_STATIC=1");
+            let include_dir = dist_dir
+                .join(target)
+                .join(profile_dir_name(profile))
+                .join(pkg)
+                .join("include");
+            cmd.arg("-I").arg(&include_dir);
+
+            let staticlib_dir = dist_dir
+                .join(target)
+                .join(profile_dir_name(profile))
+                .join(pkg)
+                .join("staticlib");
+            let staticlib_file = staticlib_filename(pkg, target);
+            let staticlib_path = staticlib_dir.join(staticlib_file);
+            cmd.arg(&staticlib_path);
+
+            if !target.contains("windows") {
+                cmd.arg("-lunwind");
+            }
+        }
+    }
+
+    run_checked("zig cc (examples/c/netif_list.c)", &mut cmd)?;
+    println!("dist: {}", exe_path.display());
+
+    if effective_artifact == ArtifactKind::Cdylib {
+        copy_runtime_dylib_if_present(dist_dir, &bin_dir, pkg, target, profile)?;
+    }
+    Ok(())
+}
+
+fn has_cdylib(dist_dir: &Path, target: &str, profile: BuildProfile, pkg: &str) -> bool {
+    let lib_basename = pkg.replace('-', "_");
+    let lib_file = if target.contains("windows") {
+        format!("{lib_basename}.dll")
+    } else if target.contains("apple-darwin") {
+        format!("lib{lib_basename}.dylib")
+    } else {
+        format!("lib{lib_basename}.so")
+    };
+
+    dist_dir
+        .join(target)
+        .join(profile_dir_name(profile))
+        .join(pkg)
+        .join("cdylib")
+        .join(lib_file)
+        .is_file()
+}
+
+fn zig_target_from_rust_target(rust_target: &str) -> Option<String> {
+    let mut it = rust_target.split('-');
+    let arch = it.next()?;
+    let _vendor = it.next()?;
+    let os = it.next()?;
+    let env = it.next();
+
+    let os = if os == "darwin" { "macos" } else { os };
+    let mut out = String::new();
+    out.push_str(arch);
+    out.push('-');
+    out.push_str(os);
+
+    if let Some(env) = env {
+        out.push('-');
+        out.push_str(env);
+    }
+
+    Some(out)
+}
+
+fn staticlib_filename(pkg: &str, target: &str) -> String {
+    let lib_basename = pkg.replace('-', "_");
+    if target.contains("windows") {
+        format!("{lib_basename}.lib")
+    } else {
+        format!("lib{lib_basename}.a")
+    }
+}
+
+fn profile_dir_name(profile: BuildProfile) -> &'static str {
+    match profile {
+        BuildProfile::Debug => "debug",
+        BuildProfile::Release => "release",
+    }
+}
+
+fn copy_runtime_dylib_if_present(
+    dist_dir: &Path,
+    bin_dir: &Path,
+    pkg: &str,
+    target: &str,
+    profile: BuildProfile,
+) -> anyhow::Result<()> {
+    let lib_basename = pkg.replace('-', "_");
+    let lib_file = if target.contains("windows") {
+        format!("{lib_basename}.dll")
+    } else if target.contains("apple-darwin") {
+        format!("lib{lib_basename}.dylib")
+    } else {
+        format!("lib{lib_basename}.so")
+    };
+
+    let candidate = dist_dir
+        .join(target)
+        .join(profile_dir_name(profile))
+        .join(pkg)
+        .join("cdylib")
+        .join(&lib_file);
+    if !candidate.is_file() {
+        return Ok(());
+    }
+
+    let dst = bin_dir.join(&lib_file);
+    fs::copy(&candidate, &dst).with_context(|| {
+        format!(
+            "复制运行时动态库失败: {} -> {}",
+            candidate.display(),
+            dst.display()
+        )
+    })?;
+    println!("dist: {}", dst.display());
     Ok(())
 }
 

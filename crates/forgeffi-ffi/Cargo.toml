@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+forgeffi-base = { path = "../forgeffi-base" }
 forgeffi-net-ffi = { path = "../forgeffi-net-ffi", optional = true }
 forgeffi-fs-ffi = { path = "../forgeffi-fs-ffi", optional = true }
 forgeffi-sys-ffi = { path = "../forgeffi-sys-ffi", optional = true }

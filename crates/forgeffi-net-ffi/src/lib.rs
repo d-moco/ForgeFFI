@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
 
-#[unsafe(no_mangle)]
-pub extern "C" fn tool_net_ffi_abi_version() -> u32 {
-    1
-}
+mod exports;
+mod mem;
+
+pub use exports::*;
 
